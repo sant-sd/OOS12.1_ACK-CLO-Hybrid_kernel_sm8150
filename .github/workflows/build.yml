@@ -34,16 +34,22 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
 
-          # إصلاح خطأ OnePlus البرمجي تلقائياً
+          # 1. إصلاح خطأ OnePlus البرمجي (المتغير المفقود)
           if [ -f drivers/gpu/drm/msm/oplus/oplus_dc_diming.c ]; then
             sed -i 's/extern oplus_dc_v2_on;/extern int oplus_dc_v2_on;/g' drivers/gpu/drm/msm/oplus/oplus_dc_diming.c
           fi
           
-          # إزالة قيود التوقف عند التحذيرات
+          # 2. إزالة قيود التوقف عند التحذيرات (-Werror)
           find . -name "Makefile" -o -name "*.mk" | xargs sed -i 's/-Werror//g'
 
+          # 3. إنشاء ملف الإعدادات المبدئي
           make ${{ env.KERNEL_DEFCONFIG }} O=$O
 
+          # 4. حل مشكلة الـ Stack Protector (إيقافها لتجاوز خطأ المترجم)
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/CONFIG_CC_STACKPROTECTOR_NONE=y/g' $O/.config
+          echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> $O/.config
+
+          # 5. بدء التجميع الفعلي
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -53,7 +59,7 @@ jobs:
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
             WERROR=0 \
-            KCFLAGS="-Wno-error -Wno-implicit-int -Wno-incompatible-pointer-types" \
+            KCFLAGS="-Wno-error -Wno-implicit-int -Wno-incompatible-pointer-types -Wno-unused-variable" \
             CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
             CROSS_COMPILE=${{ env.CROSS_COMPILE }}
 
@@ -61,8 +67,11 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
+          # محاولة العثور على ملف الكيرنل ونسخه
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb anykernel/
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz anykernel/
           else
             cp out/arch/arm64/boot/Image anykernel/
           fi
