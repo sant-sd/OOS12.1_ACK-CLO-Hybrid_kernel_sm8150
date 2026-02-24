@@ -1,39 +1,48 @@
-name: Build OnePlus7T OOS12 Kernel + NetHunter
+name: Build OOS12 Kernel (OnePlus7T)
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       DEVICE: OnePlus7T
       ARCH: arm64
       SUBARCH: arm64
       KERNEL_DEFCONFIG: sm8150_defconfig
-      CROSS_COMPILE: aarch64-linux-gnu-
       CLANG_TRIPLE: aarch64-linux-gnu-
+      CROSS_COMPILE: aarch64-linux-gnu-
+      OUT_DIR: out
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip \
-          gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang llvm lld \
+            aarch64-linux-gnu bc flex bison libncurses5-dev \
+            libssl-dev u-boot-tools cpio zip wget unzip
 
-      - name: Prepare Build Directory
+      - name: Export build variables
         run: |
-          export O=out
-          mkdir -p $O
+          export O=$OUT_DIR
+          export ARCH=$ARCH
+          export SUBARCH=$SUBARCH
 
-      - name: Build Kernel
+      - name: Prepare defconfig
         run: |
-          export O=out
-          make O=$O $KERNEL_DEFCONFIG
-          make -j$(nproc) O=$O \
+          make O=$O ARCH=$ARCH $KERNEL_DEFCONFIG
+
+      - name: Build kernel
+        run: |
+          make -j$(nproc) O=$OUT_DIR ARCH=$ARCH \
             CC=clang \
             LD=ld.lld \
             AR=llvm-ar \
@@ -44,22 +53,47 @@ jobs:
             CLANG_TRIPLE=$CLANG_TRIPLE \
             CROSS_COMPILE=$CROSS_COMPILE
 
-      - name: Package Boot.img
+      - name: Create boot.img & Flashable ZIP
         run: |
-          mkdir -p artifact
-          cp out/arch/arm64/boot/Image.gz-dtb artifact/boot.img
+          TIMESTAMP=$(date +%Y%m%d-%H%M)
+          COMMIT=$(git rev-parse --short HEAD)
+          mkdir -p images
+          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb images/
 
-      - name: Create Flashable ZIP for TWRP/OrangeFox
+          # Download AnyKernel3
+          wget -q https://github.com/osm0sis/AnyKernel3/archive/refs/heads/master.zip -O anykernel.zip
+          unzip -q anykernel.zip
+          cp images/Image.gz-dtb AnyKernel3-master/
+          cd AnyKernel3-master
+          zip -r ../FlashableKernel-${COMMIT}-${TIMESTAMP}.zip * -x '*.git*'
+          cd ..
+
+      - name: Prepare Fastboot files
         run: |
-          mkdir -p artifact/KERNEL
-          cp out/arch/arm64/boot/Image.gz-dtb artifact/KERNEL/boot.img
-          echo "ui_print('OnePlus7T Kernel');" > artifact/updater-script
-          cd artifact && zip -r OnePlus7T-Kernel.zip * && cd ..
+          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb images/boot.img
+          tar -czvf images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz -C images .
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
         with:
-          name: OnePlus7T-Kernel-Files
+          tag: build-${{ github.run_number }}
+          name: Kernel Build ${{ github.run_number }} - $COMMIT
+          body: |
+            Kernel build for $DEVICE
+            Commit: $COMMIT
+            Timestamp: $TIMESTAMP
+          draft: false
+          prerelease: false
+          artifacts: |
+            FlashableKernel-${COMMIT}-${TIMESTAMP}.zip
+            images/boot.img
+            images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz
+
+      - name: Upload artifacts (backup)
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel-build-artifacts-${COMMIT}-${TIMESTAMP}
           path: |
-            artifact/boot.img
-            artifact/OnePlus7T-Kernel.zip
+            FlashableKernel-${COMMIT}-${TIMESTAMP}.zip
+            images/boot.img
+            images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz
