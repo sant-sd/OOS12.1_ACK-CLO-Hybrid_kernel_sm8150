@@ -1,4 +1,4 @@
-name: Build OOS12 Kernel (OnePlus7T)
+name: Build OOS12 Kernel
 
 on:
   push:
@@ -6,43 +6,50 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  DEVICE: OnePlus7T
+  ARCH: arm64
+  KERNEL_DEFCONFIG: vendor/sm8150_defconfig
+  CROSS_COMPILE: aarch64-linux-gnu-
+  CLANG_TRIPLE: aarch64-linux-gnu-
+  O: out
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      DEVICE: OnePlus7T
-      ARCH: arm64
-      SUBARCH: arm64
-      KERNEL_DEFCONFIG: sm8150_defconfig
-      CLANG_TRIPLE: aarch64-linux-gnu-
-      CROSS_COMPILE: aarch64-linux-gnu-
-      OUT_DIR: out
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout source
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Set up build environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang llvm lld \
-            aarch64-linux-gnu bc flex bison libncurses5-dev \
-            libssl-dev u-boot-tools cpio zip wget unzip
+          sudo apt update
+          sudo apt install -y build-essential clang lld git bc flex bison libssl-dev zip unzip python3 python3-pip wget p7zip-full
+          export PATH=$PATH:/usr/bin
 
-      - name: Export build variables
-        run: |
-          export O=$OUT_DIR
-          export ARCH=$ARCH
-          export SUBARCH=$SUBARCH
+      - name: Upload partitions
+        uses: actions/upload-artifact@v4
+        with:
+          name: partitions
+          path: |
+            boot.emmc.win
+            dtbo.emmc.win
+            modem.emmc.win
+            recovery.emmc.win
 
-      - name: Prepare defconfig
+      - name: Extract boot for ramdisk
         run: |
-          make O=$O ARCH=$ARCH $KERNEL_DEFCONFIG
+          mkdir -p partitions_extracted
+          7z x boot.emmc.win -opartitions_extracted -y
+          magiskboot unpack partitions_extracted/boot.img
+          mv ramdisk.cpio ramdisk.img
+          mv dtbo.img dtbo.img
 
-      - name: Build kernel
+      - name: Prepare kernel
         run: |
-          make -j$(nproc) O=$OUT_DIR ARCH=$ARCH \
+          mkdir -p $O
+          make $KERNEL_DEFCONFIG O=$O
+          make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
             AR=llvm-ar \
@@ -53,47 +60,35 @@ jobs:
             CLANG_TRIPLE=$CLANG_TRIPLE \
             CROSS_COMPILE=$CROSS_COMPILE
 
-      - name: Create boot.img & Flashable ZIP
+      - name: Repack boot.img
         run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M)
-          COMMIT=$(git rev-parse --short HEAD)
-          mkdir -p images
-          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb images/
+          mkdir -p final_images
+          cp $O/arch/arm64/boot/Image.gz-dtb final_images/kernel.img
+          cp dtbo.img final_images/
+          magiskboot repack boot.img
+          mv boot.img final_images/
 
-          # Download AnyKernel3
-          wget -q https://github.com/osm0sis/AnyKernel3/archive/refs/heads/master.zip -O anykernel.zip
-          unzip -q anykernel.zip
-          cp images/Image.gz-dtb AnyKernel3-master/
-          cd AnyKernel3-master
-          zip -r ../FlashableKernel-${COMMIT}-${TIMESTAMP}.zip * -x '*.git*'
-          cd ..
-
-      - name: Prepare Fastboot files
+      - name: Create flashable ZIP
         run: |
-          cp $OUT_DIR/arch/arm64/boot/Image.gz-dtb images/boot.img
-          tar -czvf images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz -C images .
+          mkdir -p flashable
+          cp final_images/boot.img flashable/
+          cp final_images/dtbo.img flashable/
+          echo "ui_print('Installing custom kernel');" > flashable/META-INF/com/google/android/updater-script
+          zip -r final_flashable.zip flashable/*
 
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: build-${{ github.run_number }}
-          name: Kernel Build ${{ github.run_number }} - $COMMIT
-          body: |
-            Kernel build for $DEVICE
-            Commit: $COMMIT
-            Timestamp: $TIMESTAMP
-          draft: false
-          prerelease: false
-          artifacts: |
-            FlashableKernel-${COMMIT}-${TIMESTAMP}.zip
-            images/boot.img
-            images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz
+      - name: Create fastboot images
+        run: |
+          mkdir -p fastboot
+          cp final_images/boot.img fastboot/
+          cp final_images/dtbo.img fastboot/
+          cp modem.emmc.win fastboot/modem.img || true
+          cp recovery.emmc.win fastboot/recovery.img || true
 
-      - name: Upload artifacts (backup)
-        uses: actions/upload-artifact@v3
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: kernel-build-artifacts-${COMMIT}-${TIMESTAMP}
+          name: build-artifacts
           path: |
-            FlashableKernel-${COMMIT}-${TIMESTAMP}.zip
-            images/boot.img
-            images/fastboot-ready-${COMMIT}-${TIMESTAMP}.tar.gz
+            final_images/*
+            final_flashable.zip
+            fastboot/*
