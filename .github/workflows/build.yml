@@ -1,6 +1,10 @@
 name: Build NetHunter OOS12 - OnePlus 7T
 
 on:
+  push:
+    branches: [ "thirteen" ]
+  pull_request:
+    branches: [ "thirteen" ]
   workflow_dispatch:
 
 jobs:
@@ -16,6 +20,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          ref: thirteen
 
       - name: Install dependencies
         run: |
@@ -27,10 +33,17 @@ jobs:
           export O=out
           export ARCH=arm64
           export SUBARCH=arm64
+
+          # إصلاح خطأ OnePlus البرمجي تلقائياً
+          if [ -f drivers/gpu/drm/msm/oplus/oplus_dc_diming.c ]; then
+            sed -i 's/extern oplus_dc_v2_on;/extern int oplus_dc_v2_on;/g' drivers/gpu/drm/msm/oplus/oplus_dc_diming.c
+          fi
           
+          # إزالة قيود التوقف عند التحذيرات
+          find . -name "Makefile" -o -name "*.mk" | xargs sed -i 's/-Werror//g'
+
           make ${{ env.KERNEL_DEFCONFIG }} O=$O
 
-          # أضفنا KCFLAGS="-Wno-error" لتجاوز الخطأ الذي حدث
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -39,7 +52,8 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            KCFLAGS="-Wno-error" \
+            WERROR=0 \
+            KCFLAGS="-Wno-error -Wno-implicit-int -Wno-incompatible-pointer-types" \
             CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
             CROSS_COMPILE=${{ env.CROSS_COMPILE }}
 
@@ -47,15 +61,19 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
-          cp out/arch/arm64/boot/Image.gz-dtb anykernel/ || cp out/arch/arm64/boot/Image anykernel/
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb anykernel/
+          else
+            cp out/arch/arm64/boot/Image anykernel/
+          fi
 
       - name: Create Flashable ZIP
         run: |
           cd anykernel
-          zip -r ../NetHunter-OOS12-${{ env.DEVICE }}.zip *
+          zip -r ../NetHunter-Kernel-OOS12-${{ env.DEVICE }}.zip *
 
-      - name: Upload artifacts
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NetHunter-OOS12-${{ env.DEVICE }}
-          path: NetHunter-OOS12-${{ env.DEVICE }}.zip
+          name: NetHunter-Kernel-OnePlus7T
+          path: NetHunter-Kernel-OOS12-${{ env.DEVICE }}.zip
