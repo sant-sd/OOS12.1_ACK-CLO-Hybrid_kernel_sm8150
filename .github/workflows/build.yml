@@ -1,0 +1,28 @@
+name: Build NetHunter Kernel 7T
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Toolchain
+        run: |
+          sudo apt update
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm aarch64-linux-gnu-gcc
+
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          make O=out vendor/hotdogb_defconfig
+          make O=out -j$(nproc) CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Oneplus7T-Kernel
+          path: out/arch/arm64/boot/Image.gz-dtb
+          
