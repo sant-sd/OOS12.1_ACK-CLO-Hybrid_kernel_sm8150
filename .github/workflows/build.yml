@@ -1,27 +1,58 @@
-name: Build NetHunter Kernel 7T
-on: [workflow_dispatch]
+name: Build NetHunter OOS12 - OnePlus 7T
+
+on:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DEVICE: OnePlus7T
+      ARCH: arm64
+      KERNEL_DEFCONFIG: vendor/hotdogb_defconfig
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CLANG_TRIPLE: aarch64-linux-gnu-
+
     steps:
-      - name: Checkout Code
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install Toolchain
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm aarch64-linux-gnu-gcc
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip
+
+      - name: Setup ccache
+        uses: actions/cache@v3
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
+          restore-keys: ${{ runner.os }}-ccache-
 
       - name: Build Kernel
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          make O=out vendor/hotdogb_defconfig
-          make O=out -j$(nproc) CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu-
+          export O=out
+          export ARCH=${ARCH}
+          export SUBARCH=${ARCH}
+          make ${KERNEL_DEFCONFIG} O=$O
+          make -j$(nproc) O=$O CC=clang CLANG_TRIPLE=${CLANG_TRIPLE} CROSS_COMPILE=${CROSS_COMPILE}
 
-      - name: Upload Kernel Artifact
+      - name: Prepare AnyKernel3 folder
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/
+          # نسخ أي ملفات Nethunter scripts إذا كانت موجودة
+          cp -r nethunter/* anykernel/
+
+      - name: Create Flashable ZIP
+        run: |
+          cd anykernel
+          zip -r ../NetHunter-OOS12-${DEVICE}.zip *
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Oneplus7T-Kernel
-          path: out/arch/arm64/boot/Image.gz-dtb
+          name: NetHunter-OOS12-${DEVICE}
+          path: |
+            out/arch/arm64/boot/Image.gz-dtb
+            NetHunter-OOS12-${DEVICE}.zip
