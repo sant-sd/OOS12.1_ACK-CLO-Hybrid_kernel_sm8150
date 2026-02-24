@@ -1,4 +1,4 @@
-name: Build NetHunter OOS12 - OnePlus 7T
+name: Build OnePlus7T OOS12 Kernel + NetHunter
 
 on:
   workflow_dispatch:
@@ -9,33 +9,30 @@ jobs:
     env:
       DEVICE: OnePlus7T
       ARCH: arm64
-      # المسار الأكثر احتمالاً في مستودعات OnePlus/Oplus
-      KERNEL_DEFCONFIG: vendor/msmnile-oplus_defconfig
+      SUBARCH: arm64
+      KERNEL_DEFCONFIG: sm8150_defconfig
       CROSS_COMPILE: aarch64-linux-gnu-
       CLANG_TRIPLE: aarch64-linux-gnu-
 
     steps:
-      - name: Checkout source
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip \
+          gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Prepare Build Directory
+        run: |
+          export O=out
+          mkdir -p $O
 
       - name: Build Kernel
         run: |
           export O=out
-          export ARCH=arm64
-          export SUBARCH=arm64
-          
-          # التأكد من وجود ملف الإعدادات أو البحث عن البديل
-          if [ ! -f arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} ]; then
-            echo "Searching for config files..."
-            ls arch/arm64/configs/vendor/
-          fi
-
-          make ${{ env.KERNEL_DEFCONFIG }} O=$O
+          make O=$O $KERNEL_DEFCONFIG
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -44,23 +41,25 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
-            CROSS_COMPILE=${{ env.CROSS_COMPILE }}
+            CLANG_TRIPLE=$CLANG_TRIPLE \
+            CROSS_COMPILE=$CROSS_COMPILE
 
-      - name: Prepare AnyKernel3
+      - name: Package Boot.img
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
-          # نسخ الملف الناتج (سنتحقق من اسمه الصحيح)
-          cp out/arch/arm64/boot/Image.gz-dtb anykernel/ || cp out/arch/arm64/boot/Image anykernel/
+          mkdir -p artifact
+          cp out/arch/arm64/boot/Image.gz-dtb artifact/boot.img
 
-      - name: Create Flashable ZIP
+      - name: Create Flashable ZIP for TWRP/OrangeFox
         run: |
-          cd anykernel
-          zip -r ../NetHunter-OOS12-${{ env.DEVICE }}.zip *
+          mkdir -p artifact/KERNEL
+          cp out/arch/arm64/boot/Image.gz-dtb artifact/KERNEL/boot.img
+          echo "ui_print('OnePlus7T Kernel');" > artifact/updater-script
+          cd artifact && zip -r OnePlus7T-Kernel.zip * && cd ..
 
-      - name: Upload artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: NetHunter-OOS12-${{ env.DEVICE }}
-          path: NetHunter-OOS12-${{ env.DEVICE }}.zip
+          name: OnePlus7T-Kernel-Files
+          path: |
+            artifact/boot.img
+            artifact/OnePlus7T-Kernel.zip
