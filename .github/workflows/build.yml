@@ -9,7 +9,8 @@ jobs:
     env:
       DEVICE: OnePlus7T
       ARCH: arm64
-      KERNEL_DEFCONFIG: vendor/hotdogb_defconfig
+      # المسار الأكثر احتمالاً في مستودعات OnePlus/Oplus
+      KERNEL_DEFCONFIG: vendor/msmnile-oplus_defconfig
       CROSS_COMPILE: aarch64-linux-gnu-
       CLANG_TRIPLE: aarch64-linux-gnu-
 
@@ -20,39 +21,46 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip
-
-      - name: Setup ccache
-        uses: actions/cache@v3
-        with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('**/Makefile') }}
-          restore-keys: ${{ runner.os }}-ccache-
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Build Kernel
         run: |
           export O=out
-          export ARCH=${ARCH}
-          export SUBARCH=${ARCH}
-          make ${KERNEL_DEFCONFIG} O=$O
-          make -j$(nproc) O=$O CC=clang CLANG_TRIPLE=${CLANG_TRIPLE} CROSS_COMPILE=${CROSS_COMPILE}
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          # التأكد من وجود ملف الإعدادات أو البحث عن البديل
+          if [ ! -f arch/arm64/configs/${{ env.KERNEL_DEFCONFIG }} ]; then
+            echo "Searching for config files..."
+            ls arch/arm64/configs/vendor/
+          fi
 
-      - name: Prepare AnyKernel3 folder
+          make ${{ env.KERNEL_DEFCONFIG }} O=$O
+          make -j$(nproc) O=$O \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
+            CROSS_COMPILE=${{ env.CROSS_COMPILE }}
+
+      - name: Prepare AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
-          cp out/arch/arm64/boot/Image.gz-dtb anykernel/
-          # نسخ أي ملفات Nethunter scripts إذا كانت موجودة
-          cp -r nethunter/* anykernel/
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
+          # نسخ الملف الناتج (سنتحقق من اسمه الصحيح)
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/ || cp out/arch/arm64/boot/Image anykernel/
 
       - name: Create Flashable ZIP
         run: |
           cd anykernel
-          zip -r ../NetHunter-OOS12-${DEVICE}.zip *
+          zip -r ../NetHunter-OOS12-${{ env.DEVICE }}.zip *
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: NetHunter-OOS12-${DEVICE}
-          path: |
-            out/arch/arm64/boot/Image.gz-dtb
-            NetHunter-OOS12-${DEVICE}.zip
+          name: NetHunter-OOS12-${{ env.DEVICE }}
+          path: NetHunter-OOS12-${{ env.DEVICE }}.zip
