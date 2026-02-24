@@ -34,31 +34,22 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
 
-          # 1. إصلاحات كود OnePlus (معالجة الأخطاء الشائعة في الملفات المصدرية)
-          # إصلاح المتغير المفقود في شاشة الـ DC Dimming
           if [ -f drivers/gpu/drm/msm/oplus/oplus_dc_diming.c ]; then
             sed -i 's/extern oplus_dc_v2_on;/extern int oplus_dc_v2_on;/g' drivers/gpu/drm/msm/oplus/oplus_dc_diming.c
           fi
           
-          # إصلاح تداخلات الـ Headers في تعريفات البصمة والشاشة
           find drivers/soc/oplus -name "*.c" | xargs sed -i 's/asm\/uaccess.h/linux\/uaccess.h/g' || true
-          
-          # 2. إزالة قيود التحذيرات (-Werror) من كافة ملفات الماكينة
           find . -name "Makefile" -o -name "*.mk" | xargs sed -i 's/-Werror//g'
           find . -name "Makefile" -o -name "*.mk" | xargs sed -i 's/-Wfatal-errors//g'
+          find . -name "Makefile" -o -name "*.mk" | xargs sed -i 's/-implicit-function-declaration//g'
 
-          # 3. إعداد الملف المبدئي وتجاوز الأسئلة التفاعلية
           make ${{ env.KERNEL_DEFCONFIG }} O=$O
           
-          # تعطيل الـ Stack Protector وتعديل إعدادات التوافق
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/g' $O/.config
           echo "CONFIG_CC_STACKPROTECTOR_NONE=y" >> $O/.config
           
-          # تطبيق الإعدادات الجديدة تلقائياً
           make O=$O olddefconfig
 
-          # 4. بدء التجميع مع حقن "أعلام التجاهل" (Flags) للأخطاء غير القاتلة
-          # أضفنا -Wno-everything لضمان عدم توقف البناء بسبب تحذيرات Clang الصارمة
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -68,7 +59,7 @@ jobs:
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
             WERROR=0 \
-            KCFLAGS="-Wno-error -w -Wno-unused-variable -Wno-unused-function -Wno-incompatible-pointer-types" \
+            KCFLAGS="-w" \
             CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
             CROSS_COMPILE=${{ env.CROSS_COMPILE }}
 
@@ -77,7 +68,6 @@ jobs:
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
           
-          # البحث الذكي عن الكيرنل الناتج (تغطية كافة الاحتمالات)
           if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
             cp out/arch/arm64/boot/Image.gz-dtb anykernel/
           elif [ -f out/arch/arm64/boot/Image.gz ]; then
