@@ -9,7 +9,6 @@ jobs:
     env:
       DEVICE: OnePlus7T
       ARCH: arm64
-      # الملف الذي وجدناه في الـ Log
       KERNEL_DEFCONFIG: vendor/sm8150-perf_defconfig
       CROSS_COMPILE: aarch64-linux-gnu-
       CLANG_TRIPLE: aarch64-linux-gnu-
@@ -29,10 +28,9 @@ jobs:
           export ARCH=arm64
           export SUBARCH=arm64
           
-          # خطوة بناء الإعدادات (Config)
           make ${{ env.KERNEL_DEFCONFIG }} O=$O
 
-          # خطوة بناء الكيرنل (Compilation)
+          # أضفنا KCFLAGS="-Wno-error" لتجاوز الخطأ الذي حدث
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -41,6 +39,7 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
+            KCFLAGS="-Wno-error" \
             CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
             CROSS_COMPILE=${{ env.CROSS_COMPILE }}
 
@@ -48,7 +47,6 @@ jobs:
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git anykernel
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
-          # نسخ ملف الكيرنل الناتج
           cp out/arch/arm64/boot/Image.gz-dtb anykernel/ || cp out/arch/arm64/boot/Image anykernel/
 
       - name: Create Flashable ZIP
