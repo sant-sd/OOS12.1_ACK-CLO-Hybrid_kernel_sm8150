@@ -1,54 +1,38 @@
-name: Build OOS12 Kernel
+name: Build NetHunter OOS12 - OnePlus 7T
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
-
-env:
-  DEVICE: OnePlus7T
-  ARCH: arm64
-  KERNEL_DEFCONFIG: vendor/sm8150_defconfig
-  CROSS_COMPILE: aarch64-linux-gnu-
-  CLANG_TRIPLE: aarch64-linux-gnu-
-  O: out
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DEVICE: OnePlus7T
+      ARCH: arm64
+      # الملف الذي وجدناه في الـ Log
+      KERNEL_DEFCONFIG: vendor/sm8150-perf_defconfig
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CLANG_TRIPLE: aarch64-linux-gnu-
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up build environment
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential clang lld git bc flex bison libssl-dev zip unzip python3 python3-pip wget p7zip-full
-          export PATH=$PATH:/usr/bin
+          sudo apt install -y bc build-essential flex bison libssl-dev libelf-dev clang lld llvm zip gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Upload partitions
-        uses: actions/upload-artifact@v4
-        with:
-          name: partitions
-          path: |
-            boot.emmc.win
-            dtbo.emmc.win
-            modem.emmc.win
-            recovery.emmc.win
-
-      - name: Extract boot for ramdisk
+      - name: Build Kernel
         run: |
-          mkdir -p partitions_extracted
-          7z x boot.emmc.win -opartitions_extracted -y
-          magiskboot unpack partitions_extracted/boot.img
-          mv ramdisk.cpio ramdisk.img
-          mv dtbo.img dtbo.img
+          export O=out
+          export ARCH=arm64
+          export SUBARCH=arm64
+          
+          # خطوة بناء الإعدادات (Config)
+          make ${{ env.KERNEL_DEFCONFIG }} O=$O
 
-      - name: Prepare kernel
-        run: |
-          mkdir -p $O
-          make $KERNEL_DEFCONFIG O=$O
+          # خطوة بناء الكيرنل (Compilation)
           make -j$(nproc) O=$O \
             CC=clang \
             LD=ld.lld \
@@ -57,38 +41,23 @@ jobs:
             OBJCOPY=llvm-objcopy \
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
-            CLANG_TRIPLE=$CLANG_TRIPLE \
-            CROSS_COMPILE=$CROSS_COMPILE
+            CLANG_TRIPLE=${{ env.CLANG_TRIPLE }} \
+            CROSS_COMPILE=${{ env.CROSS_COMPILE }}
 
-      - name: Repack boot.img
+      - name: Prepare AnyKernel3
         run: |
-          mkdir -p final_images
-          cp $O/arch/arm64/boot/Image.gz-dtb final_images/kernel.img
-          cp dtbo.img final_images/
-          magiskboot repack boot.img
-          mv boot.img final_images/
+          git clone https://github.com/osm0sis/AnyKernel3.git anykernel
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel/anykernel.sh
+          # نسخ ملف الكيرنل الناتج
+          cp out/arch/arm64/boot/Image.gz-dtb anykernel/ || cp out/arch/arm64/boot/Image anykernel/
 
-      - name: Create flashable ZIP
+      - name: Create Flashable ZIP
         run: |
-          mkdir -p flashable
-          cp final_images/boot.img flashable/
-          cp final_images/dtbo.img flashable/
-          echo "ui_print('Installing custom kernel');" > flashable/META-INF/com/google/android/updater-script
-          zip -r final_flashable.zip flashable/*
-
-      - name: Create fastboot images
-        run: |
-          mkdir -p fastboot
-          cp final_images/boot.img fastboot/
-          cp final_images/dtbo.img fastboot/
-          cp modem.emmc.win fastboot/modem.img || true
-          cp recovery.emmc.win fastboot/recovery.img || true
+          cd anykernel
+          zip -r ../NetHunter-OOS12-${{ env.DEVICE }}.zip *
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
-          path: |
-            final_images/*
-            final_flashable.zip
-            fastboot/*
+          name: NetHunter-OOS12-${{ env.DEVICE }}
+          path: NetHunter-OOS12-${{ env.DEVICE }}.zip
